@@ -19,9 +19,9 @@ POINTS_PER_CORRECT = 10
 
 
 async def _send_question(
-    message: Message, module_id: int, lesson_id: int, question_idx: int
+    message: Message, module_id: int, lesson_id: int, question_idx: int, course_id: int = 1
 ) -> None:
-    lesson = get_lesson(module_id, lesson_id)
+    lesson = get_lesson(module_id, lesson_id, course_id)
     if not lesson:
         await message.answer("Урок не найден.")
         return
@@ -56,7 +56,9 @@ async def cmd_test(message: Message, state: FSMContext) -> None:
         await message.answer("Сначала нажми /start.")
         return
     module_id, lesson_id = position
-    await _begin_test(message, state, message.from_user.id, module_id, lesson_id)
+    user = await db.get_user(message.from_user.id)
+    course_id = user.get("current_course", 1) if user else 1
+    await _begin_test(message, state, message.from_user.id, module_id, lesson_id, course_id)
 
 
 @router.callback_query(F.data.startswith("start_test:"))
@@ -64,8 +66,10 @@ async def callback_start_test(callback: CallbackQuery, state: FSMContext) -> Non
     await callback.answer()
     parts = callback.data.split(":")
     module_id, lesson_id = int(parts[1]), int(parts[2])
+    user = await db.get_user(callback.from_user.id)
+    course_id = user.get("current_course", 1) if user else 1
     await _begin_test(
-        callback.message, state, callback.from_user.id, module_id, lesson_id
+        callback.message, state, callback.from_user.id, module_id, lesson_id, course_id
     )
 
 
@@ -75,9 +79,10 @@ async def _begin_test(
     user_id: int,
     module_id: int,
     lesson_id: int,
+    course_id: int = 1,
 ) -> None:
     try:
-        lesson = get_lesson(module_id, lesson_id)
+        lesson = get_lesson(module_id, lesson_id, course_id)
         if not lesson:
             await message.answer("Урок не найден.")
             return
@@ -86,11 +91,12 @@ async def _begin_test(
         await state.update_data(
             module_id=module_id,
             lesson_id=lesson_id,
+            course_id=course_id,
             question_idx=0,
             correct_count=0,
             total_questions=len(lesson["test"]),
         )
-        await _send_question(message, module_id, lesson_id, 0)
+        await _send_question(message, module_id, lesson_id, 0, course_id)
     except Exception as e:
         logger.error("Ошибка начала теста: %s", e)
         await message.answer("Не удалось начать тест.")
@@ -115,7 +121,8 @@ async def callback_test_answer(callback: CallbackQuery, state: FSMContext) -> No
         if question_idx != data.get("question_idx", 0):
             return
 
-        lesson = get_lesson(module_id, lesson_id)
+        course_id = data.get("course_id", 1)
+        lesson = get_lesson(module_id, lesson_id, course_id)
         if not lesson:
             await callback.message.answer("Урок не найден.")
             await state.clear()
@@ -134,7 +141,7 @@ async def callback_test_answer(callback: CallbackQuery, state: FSMContext) -> No
 
         if next_idx < total:
             await state.update_data(question_idx=next_idx, correct_count=correct_count)
-            await _send_question(callback.message, module_id, lesson_id, next_idx)
+            await _send_question(callback.message, module_id, lesson_id, next_idx, course_id)
             return
 
         await state.clear()

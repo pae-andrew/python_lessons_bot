@@ -17,6 +17,7 @@ from services.ai_checker import PASSING_GRADES, check_code
 logger = logging.getLogger(__name__)
 router = Router()
 
+
 def clean_ai_response(text: str) -> str:
     text = text.replace("&quot;", '"')
     text = text.replace("&#x27;", "'")
@@ -24,6 +25,7 @@ def clean_ai_response(text: str) -> str:
     text = text.replace("&lt;", "<")
     text = text.replace("&gt;", ">")
     return text
+
 
 def _extract_code(text: str) -> str:
     if text.startswith("```"):
@@ -43,7 +45,9 @@ async def cmd_task(message: Message, state: FSMContext) -> None:
         await message.answer("Сначала нажми /start.")
         return
     module_id, lesson_id = position
-    await _begin_task(message, state, module_id, lesson_id)
+    user = await db.get_user(message.from_user.id)
+    course_id = user.get("current_course", 1) if user else 1
+    await _begin_task(message, state, module_id, lesson_id, course_id)
 
 
 @router.callback_query(F.data.startswith("start_task:"))
@@ -51,14 +55,16 @@ async def callback_start_task(callback: CallbackQuery, state: FSMContext) -> Non
     await callback.answer()
     parts = callback.data.split(":")
     module_id, lesson_id = int(parts[1]), int(parts[2])
-    await _begin_task(callback.message, state, module_id, lesson_id)
+    user = await db.get_user(callback.from_user.id)
+    course_id = user.get("current_course", 1) if user else 1
+    await _begin_task(callback.message, state, module_id, lesson_id, course_id)
 
 
 async def _begin_task(
-    message: Message, state: FSMContext, module_id: int, lesson_id: int
+    message: Message, state: FSMContext, module_id: int, lesson_id: int, course_id: int = 1
 ) -> None:
     try:
-        lesson = get_lesson(module_id, lesson_id)
+        lesson = get_lesson(module_id, lesson_id, course_id)
         if not lesson:
             await message.answer("Урок не найден.")
             return
@@ -66,7 +72,7 @@ async def _begin_task(
         task = lesson["task"]
         text = (
             f"💻 <b>Практическая задача</b>\n"
-            f"{format_lesson_path(module_id, lesson_id)}\n\n"
+            f"{format_lesson_path(module_id, lesson_id, course_id)}\n\n"
             f"{html.escape(task['description'])}\n\n"
             f"<b>Пример входных данных:</b>\n<code>{html.escape(task['example_input'])}</code>\n\n"
             f"<b>Ожидаемый результат:</b>\n<pre>{html.escape(task['example_output'])}</pre>\n\n"
@@ -75,7 +81,7 @@ async def _begin_task(
         )
 
         await state.set_state(TaskStates.waiting_code)
-        await state.update_data(module_id=module_id, lesson_id=lesson_id)
+        await state.update_data(module_id=module_id, lesson_id=lesson_id, course_id=course_id)
         await message.answer(truncate_message(text), parse_mode="HTML")
     except Exception as e:
         logger.error("Ошибка начала задачи: %s", e, exc_info=True)
@@ -88,13 +94,14 @@ async def receive_code(message: Message, state: FSMContext, config: Config) -> N
         data = await state.get_data()
         module_id = data.get("module_id")
         lesson_id = data.get("lesson_id")
+        course_id = data.get("course_id", 1)
 
         if not module_id or not lesson_id:
             await message.answer("Сессия задачи истекла. Нажми /task снова.")
             await state.clear()
             return
 
-        lesson = get_lesson(module_id, lesson_id)
+        lesson = get_lesson(module_id, lesson_id, course_id)
         if not lesson:
             await message.answer("Урок не найден.")
             await state.clear()
@@ -189,6 +196,9 @@ async def _advance(message: Message, user_id: int) -> None:
             return
 
         module_id, lesson_id = position
+        user = await db.get_user(user_id)
+        course_id = user.get("current_course", 1) if user else 1
+
         can_next = await can_advance_lesson(user_id, module_id, lesson_id)
 
         if not can_next:
@@ -198,7 +208,7 @@ async def _advance(message: Message, user_id: int) -> None:
             )
             return
 
-        next_pos = get_next_lesson(module_id, lesson_id)
+        next_pos = get_next_lesson(module_id, lesson_id, course_id)
         if not next_pos:
             await message.answer(
                 "🎉 Ты прошёл все доступные уроки! Скоро добавим новые модули.",

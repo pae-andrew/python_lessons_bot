@@ -23,7 +23,11 @@ async def send_current_lesson(
             return
 
         module_id, lesson_id = position
-        lesson = get_lesson(module_id, lesson_id)
+
+        user = await db.get_user(user_id)
+        course_id = user.get("current_course", 1) if user else 1
+
+        lesson = get_lesson(module_id, lesson_id, course_id)
 
         if not lesson:
             text = (
@@ -36,10 +40,10 @@ async def send_current_lesson(
                 await message.answer(text)
             return
 
-        module_title = get_module_title(module_id)
+        module_title = get_module_title(module_id, course_id)
         header = (
             f"📚 **{module_title}**\n"
-            f"**{format_lesson_path(module_id, lesson_id)}**\n\n"
+            f"**{format_lesson_path(module_id, lesson_id, course_id)}**\n\n"
         )
         text = truncate_message(header + lesson["theory"])
 

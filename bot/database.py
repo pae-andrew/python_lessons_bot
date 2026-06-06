@@ -43,6 +43,7 @@ async def get_or_create_user(user_id: int, username: str | None) -> dict:
                 "username": username,
                 "current_module": 1,
                 "current_lesson": 1,
+                "current_course": 1,
                 "total_score": 0,
                 "created_at": now,
             }).execute()
@@ -82,6 +83,25 @@ async def add_score(user_id: int, points: int) -> None:
         await asyncio.to_thread(_run)
     except Exception as e:
         logger.error("Ошибка add_score для %s: %s", user_id, e)
+        raise
+
+
+async def set_course(user_id: int, course_id: int) -> dict | None:
+    """Сменить курс и сбросить прогресс на начало."""
+    try:
+        client = get_client()
+
+        def _run():
+            client.table("users").update({
+                "current_course": course_id,
+                "current_module": 1,
+                "current_lesson": 1,
+            }).eq("user_id", user_id).execute()
+
+        await asyncio.to_thread(_run)
+        return await get_user(user_id)
+    except Exception as e:
+        logger.error("Ошибка set_course для %s: %s", user_id, e)
         raise
 
 
@@ -175,7 +195,8 @@ async def advance_lesson(user_id: int) -> dict | None:
         if not user:
             return None
 
-        next_pos = get_next_lesson(user["current_module"], user["current_lesson"])
+        course_id = user.get("current_course", 1)
+        next_pos = get_next_lesson(user["current_module"], user["current_lesson"], course_id)
         if not next_pos:
             return user
 

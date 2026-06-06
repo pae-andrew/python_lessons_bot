@@ -8,6 +8,7 @@ import database as db
 from content.curriculum import (
     count_total_lessons,
     format_lesson_path,
+    get_course_name,
     get_module_title,
 )
 from handlers.helpers import truncate_message
@@ -25,13 +26,16 @@ async def build_progress_message(user_id: int) -> str:
     user = stats["user"]
     module_id = user["current_module"]
     lesson_id = user["current_lesson"]
-    total_lessons = count_total_lessons()
+    course_id = user.get("current_course", 1)
+    course_name = get_course_name(course_id)
+    total_lessons = count_total_lessons(course_id)
 
     lines = [
         "⭐ **Мой прогресс**",
         "",
-        f"📍 Текущая позиция: модуль {module_id}, урок {lesson_id}",
-        f"📚 {get_module_title(module_id)} — {format_lesson_path(module_id, lesson_id)}",
+        f"📚 Курс: **{course_name}**",
+        f"📍 Позиция: модуль {module_id}, урок {lesson_id}",
+        f"📖 {get_module_title(module_id, course_id)} — {format_lesson_path(module_id, lesson_id, course_id)}",
         f"🏆 Общий счёт: **{user['total_score']}** баллов",
         f"✅ Пройдено уроков: {stats['completed_count']}/{total_lessons}",
         "",
@@ -46,9 +50,14 @@ async def build_progress_message(user_id: int) -> str:
             test_icon = "✅" if row["test_passed"] else "❌"
             task_icon = "✅" if row["task_passed"] else "❌"
             lines.append(
-                f"• {format_lesson_path(m, l)} — "
+                f"• {format_lesson_path(m, l, course_id)} — "
                 f"🧪 {test_icon} 💻 {task_icon} ⭐ {row['score']}"
             )
+
+    lines += [
+        "",
+        "Сменить курс: /course",
+    ]
 
     return "\n".join(lines)
 
@@ -70,3 +79,14 @@ async def cmd_progress(message: Message) -> None:
     except Exception as e:
         logger.error("Ошибка /progress: %s", e)
         await message.answer("Не удалось загрузить прогресс.")
+
+
+@router.message(Command("course"))
+async def cmd_course(message: Message) -> None:
+    from handlers.start import course_selection_keyboard
+    await message.answer(
+        "Выбери курс:\n\n"
+        "⚠️ При смене курса прогресс начнётся с начала нового курса.\n"
+        "Баллы сохраняются.",
+        reply_markup=course_selection_keyboard(),
+    )
